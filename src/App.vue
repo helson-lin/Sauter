@@ -273,7 +273,7 @@ async function runScript() {
 onMounted(async () => {
   // setupSystemEventListeners();
   // get password from cache
-  getPasswordFromCache();
+  await getPasswordFromCache();
   // initial and check network status
   autoCheckNetworkStatus();
   checkIsEnableAutoStart();
