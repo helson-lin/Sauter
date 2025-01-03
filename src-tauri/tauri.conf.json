@@ -1,0 +1,45 @@
+{
+  "build": {
+    "beforeDevCommand": "pnpm dev",
+    "beforeBuildCommand": "pnpm build",
+    "frontendDist": "../dist",
+    "devUrl": "http://localhost:1420"
+  },
+  "bundle": {
+    "active": true,
+    "copyright": "helsonlin",
+    "targets": "all",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns"
+    ],
+    "macOS": {
+      "minimumSystemVersion": "10.13"
+    }
+  },
+  "plugins": {},
+  "productName": "Sauter",
+  "mainBinaryName": "Sauter",
+  "version": "0.0.1",
+  "identifier": "com.helson-lin.pinnote",
+  "app": {
+    "macOSPrivateApi": true,
+    "security": {
+      "csp": null
+    },
+    "windows": [
+      {
+        "label": "main",
+        "title": "Sauter",
+        "fullscreen": false,
+        "width": 360,
+        "height": 400,
+        "decorations": true,
+        "resizable": false,
+        "useHttpsScheme": true
+      }
+    ]
+  }
+}
