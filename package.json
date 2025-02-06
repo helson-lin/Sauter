@@ -4,10 +4,11 @@
   "version": "0.0.1",
   "type": "module",
   "scripts": {
-    "app": "tauri dev",
+    "app": "npm run  tauri dev",
     "dev": "vite",
     "build": "vite build",
     "build:app": "tauri build --debug",
+    "release": "npm run tauri build",
     "preview": "vite preview",
     "tauri": "tauri"
   },

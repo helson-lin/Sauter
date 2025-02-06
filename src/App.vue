@@ -49,7 +49,7 @@ const tabs = [
 
 const tabActive = ref('General');
 const enableAutoStart = ref(false);
-const checkInteral = ref(10);
+const checkInteral = ref(3);
 const osThemeRef = useOsTheme();
 const theme = computed(() =>
   osThemeRef.value === 'dark' ? darkTheme : lightTheme
@@ -117,11 +117,6 @@ const checkNetworkStatus = () => {
           connected.value = res ? 1 : 2;
         });
       } else {
-        logText.value.push({
-          text: '没有连接网络',
-          type: 'warning',
-          time: getLogTime(),
-        });
         connected.value = 0;
       }
     });
@@ -160,6 +155,10 @@ watchEffect(() => {
       text: '网络异常开始重新连接',
       type: 'info',
       time: getLogTime(),
+    });
+    sendNotify({
+        title: 'Sauter',
+        body: '网络异常开始重新连接',
     });
     runScript();
   }

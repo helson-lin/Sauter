@@ -4,6 +4,7 @@
     windows_subsystem = "windows"
 )]
 
+use reqwest::Client;
 use serde::Serialize;
 use std::io::Write;
 use std::process::{Command, Stdio};
@@ -16,7 +17,7 @@ use std::{
     sync::{Arc, Mutex},
 };
 use tauri::async_runtime::spawn_blocking;
-
+use tokio::time::timeout;
 // use sys_info::NetworkInfo; // 移除未解析的导入
 use log::info;
 use tokio::task;
@@ -33,20 +34,16 @@ fn set_window_always_on_top(window: Window, always_on_top: bool) {
     window.set_always_on_top(always_on_top).unwrap();
 }
 
-/// 检查进程是否正在运行
 fn is_process_running(process_name: &str) -> bool {
-    let output = Command::new("ps")
-        .arg("-Ac")
-        .arg("-o")
-        .arg("command")
+    let output = Command::new("pgrep")
+        .arg("-f") // 使用 -f 参数匹配完整命令行
+        .arg(process_name)
         .output();
 
-    if let Ok(output) = output {
-        if let Ok(output_str) = String::from_utf8(output.stdout) {
-            return output_str.lines().any(|line| line.trim() == process_name);
-        }
+    match output {
+        Ok(output) => !output.stdout.is_empty(), // 如果 stdout 不为空，则表示进程在运行
+        Err(_) => false,                         // 出现错误则返回 false
     }
-    false
 }
 
 async fn stop_process(process_name: &str) -> Result<(), String> {
@@ -115,8 +112,11 @@ async fn start_process(process_name: &str, password: &str) -> Result<(), String>
                 thread::sleep(Duration::from_secs(1));
                 sec += 1;
 
-                if sec > 10 {
-                    return Err(format!("Failed to start {}", process_name));
+                if sec > 20 {
+                    return Err(format!(
+                        "启动进程失败： {} （20s 内检测不到进程）",
+                        process_name
+                    ));
                 }
             }
         }
@@ -167,7 +167,7 @@ fn macos_network_status() -> NetworkStatus {
     let services_output = Command::new("networksetup")
         .arg("-listallnetworkservices")
         .output()
-        .expect("failed to execute process");
+        .expect("查询网络状态失败");
 
     let services_string = String::from_utf8_lossy(&services_output.stdout).into_owned(); // Key change: into_owned()
     let services: Vec<&str> = services_string.lines().skip(1).collect();
@@ -175,7 +175,7 @@ fn macos_network_status() -> NetworkStatus {
     let hardware_ports_output = Command::new("networksetup")
         .arg("-listallhardwareports")
         .output()
-        .expect("failed to execute process");
+        .expect("查询网络状态失败");
 
     let hardware_ports = String::from_utf8_lossy(&hardware_ports_output.stdout);
 
@@ -244,26 +244,89 @@ async fn stop_inode_services() -> Result<String, String> {
 async fn start_inode_services(password: String) -> Result<String, String> {
     start_process("AuthenMngService", &password).await?;
     start_process("iNodeMon", &password).await?;
-    Ok("Services started successfully".to_string())
+    Ok("服务启动成功".to_string())
 }
 
-#[tauri::command]
-async fn check_network() -> Result<bool, String> {
+// #[tauri::command]
+// async fn check_network() -> Result<bool, String> {
+//     #[cfg(target_os = "windows")]
+//     const PING_COMMAND: &str = "ping";
+//     #[cfg(not(target_os = "windows"))]
+//     const PING_COMMAND: &str = "ping";
+
+//     #[cfg(target_os = "windows")]
+//     const PING_ARGS: [&str; 3] = ["-n", "1", "8.8.8.8"];
+//     #[cfg(not(target_os = "windows"))]
+//     const PING_ARGS: [&str; 3] = ["-c", "1", "8.8.8.8"];
+
+//     match tokio::time::timeout(
+//         std::time::Duration::from_secs(2),
+//         spawn_blocking(move || {
+//             Command::new(PING_COMMAND)
+//                 .args(&PING_ARGS)
+//                 .stdout(Stdio::null())
+//                 .stderr(Stdio::null())
+//                 .status()
+//                 .map(|status| status.success())
+//                 .unwrap_or(false)
+//         }),
+//     )
+//     .await
+//     {
+//         Ok(inner_result) => {
+//             match inner_result {
+//                 Ok(ping_successful) => Ok(ping_successful),
+//                 Err(_) => Err("Error checking network: spawn_blocking failed".into()), // Improved error message and use String instead of &str
+//             }
+//         }
+//         Err(_) => Ok(false),
+//     }
+// }
+
+async fn check_ping() -> bool {
+    // 定义多个目标地址
+    let targets = ["8.8.8.8", "1.1.1.1"]; // 可以根据需要调整目标
+
+    // 定义重试次数
+    const RETRY_COUNT: usize = 3;
+
+    // 遍历目标地址并重试
+    for target in targets.iter() {
+        for _ in 0..RETRY_COUNT {
+            let ping_successful = ping_target(target.to_string()).await;
+            if ping_successful {
+                return true; // 如果任意一个目标成功，返回 true
+            }
+        }
+    }
+
+    false // 所有目标均失败，返回 false
+}
+
+async fn ping_target(target: String) -> bool {
     #[cfg(target_os = "windows")]
     const PING_COMMAND: &str = "ping";
     #[cfg(not(target_os = "windows"))]
     const PING_COMMAND: &str = "ping";
 
-    #[cfg(target_os = "windows")]
-    const PING_ARGS: [&str; 3] = ["-n", "1", "8.8.8.8"];
-    #[cfg(not(target_os = "windows"))]
-    const PING_ARGS: [&str; 3] = ["-c", "1", "8.8.8.8"];
-
-    match tokio::time::timeout(
-        std::time::Duration::from_secs(2),
+    match timeout(
+        Duration::from_secs(2), // 超时时间
         spawn_blocking(move || {
+            // 在这里创建 ping_args，确保它的生命周期正确
+            let ping_args = {
+                #[cfg(target_os = "windows")]
+                {
+                    vec!["-n", "1", target.as_str()] // 使用 target 的引用
+                }
+                #[cfg(not(target_os = "windows"))]
+                {
+                    vec!["-c", "1", target.as_str()] // 使用 target 的引用
+                }
+            };
+
+            // 使用 Command 执行 ping
             Command::new(PING_COMMAND)
-                .args(&PING_ARGS)
+                .args(&ping_args) // 使用动态生成的参数
                 .stdout(Stdio::null())
                 .stderr(Stdio::null())
                 .status()
@@ -273,14 +336,38 @@ async fn check_network() -> Result<bool, String> {
     )
     .await
     {
-        Ok(inner_result) => {
-            match inner_result {
-                Ok(ping_successful) => Ok(ping_successful),
-                Err(_) => Err("Error checking network: spawn_blocking failed".into()), // Improved error message and use String instead of &str
-            }
-        }
-        Err(_) => Ok(false),
+        Ok(inner_result) => match inner_result {
+            Ok(ping_successful) => ping_successful,
+            Err(_) => false, // 如果 spawn_blocking 失败，返回 false
+        },
+        Err(_) => false, // 如果超时，返回 false
     }
+}
+
+async fn check_http() -> bool {
+    let client = Client::new();
+    match timeout(
+        Duration::from_secs(5), // 超时时间
+        client.get("https://www.baidu.com").send(),
+    )
+    .await
+    {
+        Ok(response) => match response {
+            Ok(resp) => resp.status().is_success(), // 如果 HTTP 请求成功，返回 true
+            Err(_) => false,                        // 如果请求失败，返回 false
+        },
+        Err(_) => false, // 如果超时，返回 false
+    }
+}
+
+#[tauri::command]
+async fn check_network() -> Result<bool, String> {
+    // 检查网络连接（Ping 和 HTTP）
+    let ping_successful = check_ping().await;
+    let http_successful = check_http().await;
+
+    // 如果任意一种方式成功，则认为网络连接正常
+    Ok(ping_successful || http_successful)
 }
 
 #[derive(Debug, Serialize)]
