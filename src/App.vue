@@ -49,7 +49,7 @@ const tabs = [
 
 const tabActive = ref('General');
 const enableAutoStart = ref(false);
-const checkInteral = ref(3);
+const checkInteral = ref(1);
 const osThemeRef = useOsTheme();
 const theme = computed(() =>
   osThemeRef.value === 'dark' ? darkTheme : lightTheme
@@ -198,11 +198,11 @@ const startOrStpService = () => {
       return;
     }
     started.value = true;
+    autoCheckNetworkStatus();
     sendNotify({
       title: 'Sauter',
       body: '服务已启动',
     });
-    autoCheckNetworkStatus();
   }
 };
 
@@ -217,7 +217,7 @@ const getPasswordFromCache = async () => {
   const passwordCache = await store.get('password');
   if (passwordCache) {
     password.value = passwordCache;
-  }
+  }             
 };
 
 /**
@@ -235,10 +235,9 @@ const setPasswordToCache = async () => {
 
 async function runScript() {
   if (!password.value) {
-    logText.value.push({
-      text: '请先设置密码',
-      type: 'warning',
-      time: getLogTime(),
+    sendNotify({
+      title: 'Sauter',
+      body: '请先设置密码',
     });
   } else {
     try {
@@ -376,7 +375,7 @@ onUnmounted(() => {
             @click="startOrStpService"
           >
           <span>{{ started ? "停止" : "启动" }}</span>
-          <Icon :name="!started ? 'start' : 'pause'" :size="15"  :class="['ml-2', started ? 'text-yellow-600': 'text-green-500']"/>
+          <Icon :name="!started ? 'start' : 'pause'" :size="15"  :class="['ml-2', started ? 'text-yellow-600': 'text-green-500', !started ? '' : 'starting']"/>
           </button>
         </div>
         <LogPreview v-if="tabActive === 'Log'" v-model:text="logText" />
@@ -407,6 +406,24 @@ header {
     .general {
       height: calc(100% - 2rem);
     }
+  }
+  @keyframes circle-in-circle {
+    0% {
+        transform-origin: center center;
+        transform: translate(0,0) rotate(0deg);
+    }
+    50% {
+        transform-origin: 50% 50%;
+        transform: translate(1px,0) rotate(180deg);
+    }
+    100% {
+        transform-origin: center center;
+        transform: translate(0,0) rotate(360deg);
+    }
+    
+  }
+  .starting {
+    animation: 4s circle-in-circle infinite;
   }
 }
 </style>

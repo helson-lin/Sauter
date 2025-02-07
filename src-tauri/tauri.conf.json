@@ -22,8 +22,8 @@
   "plugins": {},
   "productName": "Sauter",
   "mainBinaryName": "Sauter",
-  "version": "0.0.1",
-  "identifier": "com.helson-lin.pinnote",
+  "version": "0.0.2",
+  "identifier": "com.helson-lin.sauter",
   "app": {
     "macOSPrivateApi": true,
     "security": {
