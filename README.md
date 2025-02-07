@@ -21,6 +21,8 @@ This is an auto-connect network software for skipping inode security checks. Tes
 
 ## 使用需知
 
+**E0585版本的 inodeClient**才可以使用，更高的版本，无法跳过。
+
 启动之前需要设置用户密码：用户密码就是当前用户的密码。软件需要 sudo 权限去启动 inode 程序，所以需要用户密码去提升权限。
 
 ## 免责声明
