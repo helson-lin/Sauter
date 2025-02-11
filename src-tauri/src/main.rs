@@ -4,6 +4,7 @@
     windows_subsystem = "windows"
 )]
 
+use log::info;
 use reqwest::Client;
 use serde::Serialize;
 use std::io::Write;
@@ -17,10 +18,8 @@ use std::{
     sync::{Arc, Mutex},
 };
 use tauri::async_runtime::spawn_blocking;
-use tokio::time::timeout;
-// use sys_info::NetworkInfo; // 移除未解析的导入
-use log::info;
 use tokio::task;
+use tokio::time::timeout;
 // use tauri::event;
 use tauri::Window;
 
@@ -244,7 +243,7 @@ async fn stop_inode_services() -> Result<String, String> {
 async fn start_inode_services(password: String) -> Result<String, String> {
     start_process("AuthenMngService", &password).await?;
     start_process("iNodeMon", &password).await?;
-    Ok("服务启动成功".to_string())
+    Ok("iNodeClient服务启动成功".to_string())
 }
 
 // #[tauri::command]

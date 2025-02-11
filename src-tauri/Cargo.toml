@@ -1,6 +1,6 @@
 [package]
 name = "Sauter"
-version = "0.0.2"
+version = "0.0.3"
 description = "a tool to skip inode safe check"
 authors = ["helsonlin"]
 edition = "2021"

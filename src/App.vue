@@ -1,10 +1,11 @@
 <script setup>
-import { onMounted, onUnmounted, computed, ref, watchEffect } from 'vue';
+import { onMounted, onUnmounted, computed, ref, watchEffect, reactive } from 'vue';
 import {
   useOsTheme,
   darkTheme,
   lightTheme,
   NTabs,
+  NSwitch,
   NInputNumber,
 } from 'naive-ui';
 import {
@@ -16,24 +17,9 @@ import { enable, isEnabled, disable } from '@tauri-apps/plugin-autostart';
 import LogPreview from './components/Log.vue';
 import { Store } from '@tauri-apps/plugin-store';
 import { GlassesOutline, Glasses, DocumentOutline } from '@vicons/ionicons5';
+import { event } from '@tauri-apps/api'; 
 import { invoke } from '@tauri-apps/api/core';
-// import { system } from '@tauri-apps/api';
 
-const themeOverrides = {
-  // common: {
-  //   primaryColor: '#384151',
-  // },
-  // Button: {
-  //   textColor: '#384151',
-  // },
-  // Select: {
-  //   peers: {
-  //     InternalSelection: {
-  //       textColor: '#384151',
-  //     },
-  //   },
-  // },
-};
 
 const tabs = [
   {
@@ -49,24 +35,31 @@ const tabs = [
 
 const tabActive = ref('General');
 const enableAutoStart = ref(false);
-const checkInteral = ref(1);
 const osThemeRef = useOsTheme();
 const theme = computed(() =>
   osThemeRef.value === 'dark' ? darkTheme : lightTheme
 );
 
+const clientOptions = reactive({
+  checkInteral: 1, // 网络检查的时间间隔
+  repeatInterval: 3, // 重连模式的间隔
+  password: '', // 电脑密码
+  connectModel: true, // 启动模式，false为检查模式，true为重连模式
+});
+
 const started = ref(false);
-const password = ref('');
 const connected = ref(0);
+const isFirst = ref(true);
+const interval = ref(null);
 // 网络状态映射表
 const connectedMap = {
   0: '未连接',
   1: '网络正常',
   2: '未联网',
 };
-const isFirst = ref(true);
-const interval = ref(null);
 const logText = ref([]);
+
+const clientOptionsMix = computed(() => JSON.stringify(clientOptions));
 
 const getLogTime = () => new Date().toLocaleTimeString();
 
@@ -87,6 +80,9 @@ const sendNotify = async (options) => {
   }
 };
 
+/**
+ * @description 开启或者关闭程序自启动
+ */
 const changeAutoStart = async () => {
   if (enableAutoStart.value) {
     await disable();
@@ -96,17 +92,19 @@ const changeAutoStart = async () => {
   checkIsEnableAutoStart();
 };
 
-// async function setupSystemEventListeners() {
-//   system.listen('tau://system-event', (event) => {
-//     if (event.payload === 'resume') {
-//       // 系统唤醒时的逻辑
-//       console.log('System has woken up.');
-//     } else if (event.payload === 'suspend') {
-//       // 系统休眠时的逻辑
-//       console.log('System is going to sleep.');
-//     }
-//   });
-// }
+async function setupSystemEventListeners() {
+  try {
+    await event.listen('tauri://focus', () => {
+      console.log('System is going to sleep.');
+    });
+
+    await event.listen('system-resume', () => {
+      console.log('System has woken up.');
+    });
+  } catch (error) {
+    console.error('Error setting up system event listeners:', error);
+  }
+}
 
 const checkNetworkStatus = () => {
   try {
@@ -142,12 +140,65 @@ const autoCheckNetworkStatus = async () => {
   interval.value = setInterval(async () => {
     if (isFirst.value) isFirst.value = false;
     checkNetworkStatus();
-  }, checkInteral.value * 1000);
+  }, clientOptions.checkInteral * 1000);
 };
 
 const checkIsEnableAutoStart = async () => {
   enableAutoStart.value  = await isEnabled();
 };
+
+/**
+ * 用于从缓存中获取密码。如果缓存中有密码，则将其赋值给password.value。
+ *
+ * @async
+ * @return {Promise<void>} 无返回值，但会改变全局变量password.value的值。
+ */
+const getClientOptionsFromCache = async () => {
+  const store = await Store.load('settings.json');
+  const optionsCacheStr = await store.get('options');
+  if (optionsCacheStr) {
+    const optionsCache = JSON.parse(optionsCacheStr);
+    if (optionsCache.password) clientOptions.password = optionsCache.password;
+    if (optionsCache.checkInteral) clientOptions.checkInteral = optionsCache.checkInteral;
+    if (optionsCache.connectModel) clientOptions.connectModel = optionsCache.connectModel;
+    if (optionsCache.repeatInterval) clientOptions.repeatInterval = optionsCache.repeatInterval;
+  }
+};
+
+/**
+ * 用于将密码存储到缓存中。如果密码值为空，则直接返回；否则，将密码值存储到名为'password'的缓存中。
+ *
+ * @async
+ * @function setPasswordToCache
+ * @return {Promise<void>} 无返回值，但会改变缓存中的'password'项的值。
+ */
+const setClientOptionCache = async () => {
+  if (!clientOptions.password) return;
+  const store = await Store.load('settings.json');
+  await store.set('options', JSON.stringify(clientOptions));
+};
+
+function debounce(func, wait) {
+  let timeout;
+
+  return function(...args) {
+    const context = this;
+
+    clearTimeout(timeout);
+    timeout = setTimeout(() => {
+      func.apply(context, args);
+    }, wait);
+  };
+}
+
+
+
+watchEffect(() => {
+  if (clientOptionsMix.value) {
+    // 防抖处理，避免频繁写入缓存
+    debounce(setClientOptionCache, 500)();
+  }
+});
 
 watchEffect(() => {
   if (connected.value === 2 && !isFirst.value) {
@@ -172,7 +223,7 @@ const startOrStpService = () => {
     started.value = false;
     clearInterval(interval.value);
   } else {
-    if (!password.value) {
+    if (!clientOptions.password) {
       // 如果没有密码的情况，服务不能启动
       sendNotify({
         title: 'Sauter',
@@ -197,44 +248,47 @@ const startOrStpService = () => {
       });
       return;
     }
-    started.value = true;
-    autoCheckNetworkStatus();
-    sendNotify({
-      title: 'Sauter',
-      body: '服务已启动',
+    startService().then(() => {
+      started.value = true;
+      sendNotify({
+        title: 'Sauter',
+        body: '服务已启动',
+      });
     });
   }
 };
 
-/**
- * 用于从缓存中获取密码。如果缓存中有密码，则将其赋值给password.value。
- *
- * @async
- * @return {Promise<void>} 无返回值，但会改变全局变量password.value的值。
- */
-const getPasswordFromCache = async () => {
-  const store = await Store.load('settings.json');
-  const passwordCache = await store.get('password');
-  if (passwordCache) {
-    password.value = passwordCache;
-  }             
-};
 
-/**
- * 用于将密码存储到缓存中。如果密码值为空，则直接返回；否则，将密码值存储到名为'password'的缓存中。
- *
- * @async
- * @function setPasswordToCache
- * @return {Promise<void>} 无返回值，但会改变缓存中的'password'项的值。
- */
-const setPasswordToCache = async () => {
-  if (!password.value) return;
-  const store = await Store.load('settings.json');
-  await store.set('password', password.value);
+const startService = () => {
+  return new Promise((resolve, reject) => {
+    try {
+      logText.value.push({
+          text: `服务将以${clientOptions.connectModel ? '【重连模式】' : '【检查模式】'}启动`,
+          type: 'info',
+          time: getLogTime(),
+      });
+      if (clientOptions.connectModel) {
+        // 定时运行重连
+        // 1. 清除定时任务
+        clearInterval(interval.value);
+        // 2. 设置定时任务, 执行重连方法
+        runScript();
+        interval.value = setInterval(async () => {
+          runScript();
+        }, clientOptions.repeatInterval * 60000);
+        resolve();
+      } else {
+        autoCheckNetworkStatus();
+        resolve();
+      }
+    } catch {
+      reject();
+    }
+  });
 };
 
 async function runScript() {
-  if (!password.value) {
+  if (!clientOptions.password) {
     sendNotify({
       title: 'Sauter',
       body: '请先设置密码',
@@ -244,7 +298,7 @@ async function runScript() {
       const result = await invoke('stop_inode_services');
       if (result === '1') {
         const startSuccessCode = await invoke('start_inode_services', {
-          password: password.value,
+          password: clientOptions.password,
         });
         logText.value.push({
           text: startSuccessCode,
@@ -269,11 +323,12 @@ async function runScript() {
 }
 
 onMounted(async () => {
-  // setupSystemEventListeners();
+  setupSystemEventListeners();
   // get password from cache
-  await getPasswordFromCache();
+  await getClientOptionsFromCache();
   // initial and check network status
   autoCheckNetworkStatus();
+  // check auto start status
   checkIsEnableAutoStart();
 });
 
@@ -283,7 +338,7 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <n-config-provider :theme="theme" :theme-overrides="themeOverrides">
+  <n-config-provider :theme="theme">
     <header class="px-4 h-12">
       <n-tabs ref="tabsInstRef" v-model:value="tabActive" size="large">
         <n-tab v-for="tab in tabs" :key="tab.code" :name="tab.code">
@@ -322,18 +377,18 @@ onUnmounted(() => {
           </div>
           <div class="flex items-center border py-2">
             <label for="password" class="mr-2 font-bold w-20 label leading-8"
-              >用户密码:
+              >电脑密码:
             </label>
             <div class="flex items-center flex-1">
               <!-- 输入密码 -->
               <n-input
                 type="password"
                 :show-password-on="'mousedown'"
-                v-model:value="password"
-                placeholder="请输入密码"
-                style="width: 15rem"
-                @on-input="setPasswordToCache"
-                @keyup.enter="setPasswordToCache"
+                v-model:value="clientOptions.password"
+                placeholder="请输入电脑密码"
+                style="width: 14rem"
+                @on-input="setClientOptionCache"
+                @keyup.enter="setClientOptionCache"
               >
                 <template #password-visible-icon>
                   <n-icon :size="16" :component="GlassesOutline" />
@@ -346,14 +401,49 @@ onUnmounted(() => {
           </div>
           <div class="flex items-center border py-2">
             <label for="launch" class="mr-2 font-bold w-20 label leading-8"
-              >检查间隔：</label
+              >轮询间隔：</label
             >
             <div class="flex items-center flex-1">
               <n-input-number
-                style="width: 15rem"
-                v-model:value="checkInteral"
+                :show-button="false"
+                style="width: 14rem"
+                placeholder="轮询网络检查时间间隔"
+                v-model:value="clientOptions.checkInteral"
                 :min="1"
-              ></n-input-number>
+              >
+              <template #suffix>秒</template>
+            </n-input-number>
+            </div>
+          </div>
+          <div class="flex items-center border py-2" v-if="clientOptions.connectModel">
+            <label for="launch" class="mr-2 font-bold w-20 label leading-8"
+              >重连间隔：</label
+            >
+            <div class="flex items-center flex-1">
+              <n-input-number
+                :show-button="false"
+                style="width: 14rem"
+                placeholder="重连时间间隔"
+                v-model:value="clientOptions.repeatInterval"
+                :min="1"
+              >
+              <template #suffix>分钟</template>
+            </n-input-number>
+            </div>
+          </div>
+          <div class="flex items-center border py-2">
+            <label for="launch" class="mr-2 font-bold w-20 label leading-8"
+              >重连模式：</label
+            >
+            <div class="flex items-center cursor-pointer pl-1">
+              <n-switch :round="false" v-model:value="clientOptions.connectModel">
+                <template #checked>
+                  重连模式
+                </template>
+                <template #unchecked>
+                  检查模式
+                </template>
+              </n-switch>
             </div>
           </div>
           <div class="flex items-center border py-2">
